@@ -1,0 +1,104 @@
+##Analysis for reference based OTU picking from DictDb, then Greengenes, then denovo OTU picking from both. 
+
+
+1.	Using Uclust, reference based OTU picking with DictDb as a reference database. The seqs that failed to cluster to a DictDb reference sequence will be used in next step. 
+
+parallel_pick_otus_uclust_ref.py -i AllDiet_seqs.fna -o ref_otus_from_dictdb/ -r DictDb/DictDb_v3_V4.fasta -O 10
+
+
+2.	Sequence identifiers (in .txt file) of sequences that failed to cluster to the DictDb database will be used to filter the seqs out of the original .fna file and the resulting file will be stored in ‘ref_otus_from_gg’ folder. 
+
+filter_fasta.py -f AllDiet_seqs.fna -o ref_otus_from_gg/ref_fail_from_dictdb.fasta -s ref_otus_from_dictdb/AllDiet_seqs_failures.txt
+
+
+3.	The filtered .fna file will now be used to cluster OTUs using the Greengenes database. The seqs that fail to cluster to a Greengenes reference will be used in the next step. 
+
+parallel_pick_otus_uclust_ref.py -i ref_otus_from_gg/ref_fail_from_dictdb.fasta -o ref_otus_from_gg/ -r greengenes/97_otus_v4.fasta -O 10
+
+
+4.	Sequence identifiers of seqs that failed to cluster to a greengenes reference will be used to filter the seqs out of the original .fna file and the resulting file will be stored in ‘denovo_otus’ folder.
+
+filter_fasta.py -f AllDiet_seqs.fna -o denovo_otus/ref_fail_from_gg.fasta -s ref_otus_from_gg/ref_fail_from_dictdb_failures.txt 
+
+
+5.	The filtered .fna file will be clustered denovo using a combined dictdb/greengenes database as the training set. 
+
+pick_otus.py -i denovo_otus/ref_fail_from_gg.fasta -o denovo_otus/ -m uclust_ref -r gg_dictdb/gg_dictdb_filtered.fasta 
+
+
+
+6.	Representative sets were made for dictdb set and gg set 
+
+pick_rep_set.py -i ref_otus_from_dictdb/AllDiet_seqs_otus.txt -r DictDb/DictDb_v3_V4.fasta -o dictdb_Rep_Set.fasta
+
+pick_rep_set.py -i ref_otus_from_gg/ref_fail_from_dictdb_otus.txt -r greengenes/97_otus_v4.fasta -o gg_Rep_Set.fasta
+
+
+7.	A rep set was picked for the denovo set 
+
+pick_rep_set.py -i denovo_otus/ref_fail_from_gg_otus.txt -f denovo_otus/ref_fail_from_gg.fasta -o denovo_Rep_Set.fasta
+
+
+8.	Align the denovo rep set for chimera checking
+
+parallel_align_seqs_pynast.py –I denovo_Rep_Set.fasta -o ref_failures/ -e 75 -O 12
+
+
+9.	Chimera checking on the denovo aligned rep set
+
+parallel_identify_chimeric_seqs.py -i ref_failures/denovo_Rep_Set_aligned.fasta -a gg_dictdb/gg_dictdb_aligned.fasta -O 12
+
+
+10.	Adjust files for processing
+
+$ find ./ -name '*_otus.txt' -exec cat {} ';' >otus_complete.txt
+
+$ grep '>' ref_failures/denovo_Rep_Set_failures.fasta | tr -d '>'  | cut -d\  -f 1,1 >filter_unaligned.txt
+
+$ cat filter_unaligned.txt denovo_Rep_Set_aligned_chimeric.txt > bad_otus.txt
+
+
+11.	concatenate the 3 rep sets
+
+$ cat dictdb_Rep_Set.fasta gg_Rep_Set.fasta denovo_Rep_Set_aligned.fasta >Rep_Set_aligned.fasta
+
+
+12.	unalign the rep set 
+
+$ tr -d '-' <Rep_Set_aligned.fasta >Rep_Set.fasta
+
+
+13.	assign taxonomy
+
+assign_taxonomy.py -i Rep_Set.fasta -t gg_dictdb/gg_dictdb_tax.txt -r gg_dictdb/gg_dictdb_filtered.fasta -o RDP_classifier/ 
+
+
+
+14.	make otu table
+
+make_otu_table.py -i otus_complete.txt -o raw_otu_table.biom -t RDP_classifier/Rep_Set_tax_assignments.txt -e bad_otus.txt 
+
+
+15.	filter otu table
+
+filter_otus_from_otu_table.py -i raw_otu_table.biom -o tmp1.biom -n 3
+
+filter_otus_from_otu_table.py -i tmp1.biom -o otu_table.biom --min_count_fraction 0.00005
+
+
+16.	Rarify all samples to 18000 reads
+
+single_rarefaction.py -i otu_table.biom -o even_table.biom -d 18000
+
+
+17.	These next two commands will create a taxonomy table that you can use to create bar charts or tables of the taxa in your samples. These will output a table for each taxonomic level. The files in the abs/ folder show absolute numbers instead of relative abundance (percentages). 
+
+summarize_taxa.py -i even_table.biom -o taxa_summary/
+summarize_taxa.py -i even_table.biom -o taxa_summary/abs/ -a
+
+
+18.	This command will create a table with the alpha diversity. There are more metrics available on the Qiime scripts website that you can choose to use. The basic metrics are listed in the command below. 
+
+		
+alpha_diversity.py -i even_table.biom -o alpha_even.txt -m osd,simpson,shannon,PD_whole_tree -t Rep_Set_tree.tree
+

@@ -1,0 +1,50 @@
+This is the R workflow for creating MDS plots with the Bray Curtis metric. The 'table.txt' and 'env.txt' files will be different names depending on your filenames
+
+#Load the packages you will need and set your working directory to the folder your data is in
+library(vegan)
+library(ggplot2)
+setwd("~/Desktop/Lab_Folder/Projects/R/Diet")
+
+#Load OTU table
+otu <- (read.table("All_table.txt",row.names=1,header=T))
+str(otu)
+
+#Load in table that says which samples go to which colonies
+otu.env <-read.table("All_env.txt",row.names=1,header=T)
+
+# calculate distance for MDS-use one or the other
+#otu.mds <- metaMDS(otu)
+otu.mds<-metaMDS(otu,distance="bray")
+
+# plot MDS using basic plot function and color points by "Diet" from env file
+plot(otu.mds$points, col = otu.env$Diet)
+
+#Make MDS data frame
+MDS = data.frame(MDS1 = otu.mds$points[,1], MDS2 = otu.mds$points[,2],group=otu.env$Diet)
+
+ord<-ordiellipse(otu.nmds, otu.env$Diet, display = "sites",kind = "sd", conf = 0.95, label = T)
+
+veganCovEllipse<-function (cov, center = c(0, 0), scale = 1, npoints = 100) 
+{
+  theta <- (0:npoints) * 2 * pi/npoints
+  Circle <- cbind(cos(theta), sin(theta))
+  t(center + scale * t(Circle %*% chol(cov)))
+}
+df_ell <- data.frame()
+for(g in levels(MDS$group)){
+  df_ell <- rbind(df_ell, cbind(as.data.frame(with(MDS[MDS$group==g,],
+                                                   veganCovEllipse(ord[[g]]$cov,ord[[g]]$center,ord[[g]]$scale))),group=g))
+}
+
+##
+
+#Create plot with ellipses
+p <- ggplot(data=MDS, aes(MDS1, MDS2)) + geom_point(aes(color= group, size=1,)) +
+  geom_path(data=df_ell, aes(x=MDS1, y=MDS2,colour=group), size=0.5, linetype=2)+
+  theme(panel.background=element_blank())
+
+
+#Colors points by Diet 
+p + geom_point(aes(size=otu.env$Day, colour=group)) +
+  scale_colour_manual(values=c("black","violetred1","skyblue1","blue1","darkorange1","chartreuse3","darkorchid2","gold1"))
+  
